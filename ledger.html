@@ -210,7 +210,6 @@
     <div class="manual-row" id="manualRow" style="display:none;">
       <input type="text" class="name" id="manualName" placeholder="Food name">
       <input type="number" class="kcal" id="manualKcal" placeholder="kcal" inputmode="decimal">
-      <input type="number" class="portions" id="manualPortions" placeholder="portions" value="1" step="0.25" inputmode="decimal">
       <button id="manualAdd">Add</button>
     </div>
   </div>
@@ -516,13 +515,10 @@ document.getElementById('toggleManual').addEventListener('click', () => {
 document.getElementById('manualAdd').addEventListener('click', async () => {
   const name = document.getElementById('manualName').value.trim();
   const kcal = parseFloat(document.getElementById('manualKcal').value);
-  const portionsRaw = parseFloat(document.getElementById('manualPortions').value);
-  const portions = isNaN(portionsRaw) || portionsRaw <= 0 ? 1 : portionsRaw;
   if(!name || isNaN(kcal)) return;
-  await addEntry(name, kcal, portions);
+  await addEntry(name, kcal, 1);
   document.getElementById('manualName').value = '';
   document.getElementById('manualKcal').value = '';
-  document.getElementById('manualPortions').value = '1';
 });
 
 document.getElementById('editGoalBtn').addEventListener('click', () => {
