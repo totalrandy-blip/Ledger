@@ -95,9 +95,37 @@
   }
   .manual-row input.name{ flex:2; }
   .manual-row input.kcal{ flex:1; min-width:0; }
+  .manual-row input.portions{ flex:0 0 78px; min-width:0; }
   .manual-row button{
     background: var(--accent); border:none; border-radius:7px; color:#1A1808;
     padding: 0 16px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .field-label{ font-size:10px; color:var(--text-muted); margin-bottom:3px; display:block; }
+
+  .portion-picker{
+    background: var(--surface-2); border:1px solid var(--line); border-radius:8px;
+    padding: 12px; margin-top: 8px; display:none; flex-direction:column; gap:10px;
+  }
+  .portion-picker .ppname{ font-size:14px; }
+  .portion-picker .ppbase{ font-size:12px; color:var(--text-muted); }
+  .portion-picker .quick{ display:flex; gap:6px; flex-wrap:wrap; }
+  .portion-picker .quick button{
+    background: var(--surface); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer;
+  }
+  .portion-picker .quick button.active{ border-color: var(--accent); color: var(--accent); }
+  .portion-picker .customrow{ display:flex; gap:8px; align-items:center; }
+  .portion-picker .customrow input{
+    width:70px; background: var(--surface); border:1px solid var(--line); border-radius:6px;
+    color: var(--text); padding:8px; font-size:14px; font-family:inherit;
+  }
+  .portion-picker .customrow button{
+    background: var(--accent); border:none; border-radius:6px; color:#1A1808;
+    padding: 8px 16px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .portion-picker .cancel{
+    background:none; border:none; color:var(--text-muted); font-size:12px;
+    text-decoration:underline; text-underline-offset:3px; cursor:pointer; padding:0; align-self:flex-start;
   }
 
   .results{ margin-top:10px; display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; }
@@ -116,7 +144,8 @@
     display:flex; justify-content:space-between; align-items:center;
     padding: 12px 0; border-bottom: 1px solid var(--line);
   }
-  .entry .ename{ font-size:15px; }
+  .entry .ename{ font-size:15px; cursor:pointer; }
+  .entry .ename:hover{ text-decoration: underline; text-underline-offset:3px; color: var(--accent); }
   .entry .emeta{ font-size:12px; color:var(--text-muted); margin-top:2px; }
   .entry .eright{ display:flex; align-items:center; gap:12px; }
   .entry .ekcal{ font-size:15px; color:var(--text); font-variant-numeric: tabular-nums; }
@@ -175,11 +204,13 @@
       <button class="searchbtn" id="searchBtn">Search</button>
     </div>
     <div class="results" id="results"></div>
+    <div class="portion-picker" id="portionPicker"></div>
     <div class="searching" id="searching" style="display:none;">Searching…</div>
     <button class="toggle-manual" id="toggleManual">or enter manually</button>
     <div class="manual-row" id="manualRow" style="display:none;">
       <input type="text" class="name" id="manualName" placeholder="Food name">
-      <input type="number" class="kcal" id="manualKcal" placeholder="kcal" inputmode="numeric">
+      <input type="number" class="kcal" id="manualKcal" placeholder="kcal" inputmode="decimal">
+      <input type="number" class="portions" id="manualPortions" placeholder="portions" value="1" step="0.25" inputmode="decimal">
       <button id="manualAdd">Add</button>
     </div>
   </div>
@@ -273,8 +304,8 @@ function render(){
     logList.innerHTML = entries.slice().reverse().map(e => `
       <div class="entry" data-id="${e.id}">
         <div>
-          <div class="ename">${escapeHtml(e.name)}</div>
-          ${e.servings && e.servings !== 1 ? `<div class="emeta">${e.servings} servings</div>` : ''}
+          <div class="ename" data-id="${e.id}">${escapeHtml(e.name)}</div>
+          ${e.servings && e.servings !== 1 ? `<div class="emeta">${e.servings} portion${e.servings === 1 ? '' : 's'} — tap to edit</div>` : `<div class="emeta">tap to edit portion</div>`}
         </div>
         <div class="eright">
           <div class="ekcal">${e.calories}</div>
@@ -282,6 +313,10 @@ function render(){
         </div>
       </div>
     `).join('');
+
+    document.querySelectorAll('.ename').forEach(el => {
+      el.addEventListener('click', () => editEntryPortion(el.getAttribute('data-id')));
+    });
 
     document.querySelectorAll('.edel').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -294,27 +329,47 @@ function render(){
   }
 }
 
+async function editEntryPortion(id){
+  const entry = entries.find(e => e.id === id);
+  if(!entry) return;
+  const baseKcal = entry.kcalPerServing || (entry.calories / (entry.servings || 1));
+  const val = prompt('Portions of "' + entry.name + '" (' + Math.round(baseKcal) + ' kcal per whole portion). Try 0.5 for half.', entry.servings || 1);
+  if(val === null) return;
+  const num = parseFloat(val);
+  if(!isNaN(num) && num > 0){
+    entry.kcalPerServing = baseKcal;
+    entry.servings = num;
+    entry.calories = Math.round(baseKcal * num);
+    await saveEntries();
+    render();
+  }
+}
+
 function escapeHtml(str){
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
 }
 
-async function addEntry(name, calories, servings){
+async function addEntry(name, kcalPerServing, servings){
+  const s = servings || 1;
   entries.push({
     id: Date.now().toString() + Math.random().toString(36).slice(2,7),
-    name, calories: Math.round(calories), servings: servings || 1
+    name, kcalPerServing: kcalPerServing, servings: s, calories: Math.round(kcalPerServing * s)
   });
   await saveEntries();
   render();
 }
 
-// search — USDA FoodData Central (supports browser CORS; DEMO_KEY works with no signup,
-// swap in your own free key from https://fdc.nal.usda.gov/api-key-signup.html if you hit rate limits)
+// search — chains multiple free food databases until one returns results.
+// 1) USDA FoodData Central (DEMO_KEY works with no signup; swap in your own free key from
+//    https://fdc.nal.usda.gov/api-key-signup.html if you hit rate limits)
+// 2) Open Food Facts (backup — broader on branded/packaged products)
+// If both come up empty, offers a Google search fallback.
 const USDA_API_KEY = 'DEMO_KEY';
+let currentResults = [];
 
 function extractKcal(food){
-  // Prefer label-based calories-per-serving (branded foods), else the general Energy value (usually per 100g)
   if(food.labelNutrients && food.labelNutrients.calories && typeof food.labelNutrients.calories.value === 'number'){
     return { kcal: food.labelNutrients.calories.value, perServing: true };
   }
@@ -327,52 +382,125 @@ function extractKcal(food){
   return null;
 }
 
+async function searchUSDA(q){
+  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + USDA_API_KEY +
+    '&query=' + encodeURIComponent(q) + '&pageSize=12';
+  const res = await fetch(url);
+  if(!res.ok){ throw new Error('USDA HTTP ' + res.status); }
+  const data = await res.json();
+  return (data.foods || [])
+    .map(f => {
+      const info = extractKcal(f);
+      if(!info) return null;
+      return {
+        name: f.description + (f.brandOwner ? ' — ' + f.brandOwner : ''),
+        kcalPerServing: info.kcal,
+        unitLabel: info.perServing ? 'per serving' : 'per 100g'
+      };
+    })
+    .filter(Boolean);
+}
+
+async function searchOFF(q){
+  const url = 'https://world.openfoodfacts.org/cgi/search.pl?search_terms=' +
+    encodeURIComponent(q) + '&search_simple=1&action=process&json=1&page_size=12';
+  const res = await fetch(url);
+  if(!res.ok){ throw new Error('OFF HTTP ' + res.status); }
+  const data = await res.json();
+  return (data.products || [])
+    .filter(p => p.product_name && p.nutriments && (p.nutriments['energy-kcal_100g'] || p.nutriments['energy-kcal_serving']))
+    .map(p => {
+      const perServing = p.nutriments['energy-kcal_serving'];
+      const per100g = p.nutriments['energy-kcal_100g'];
+      return {
+        name: p.product_name + (p.brands ? ' — ' + p.brands.split(',')[0] : ''),
+        kcalPerServing: perServing || per100g,
+        unitLabel: perServing ? 'per serving' : 'per 100g'
+      };
+    });
+}
+
 async function doSearch(){
   const q = document.getElementById('searchInput').value.trim();
   const resultsEl = document.getElementById('results');
   const searchingEl = document.getElementById('searching');
+  document.getElementById('portionPicker').style.display = 'none';
   resultsEl.innerHTML = '';
   if(!q) return;
   searchingEl.style.display = 'block';
-  try{
-    const url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + USDA_API_KEY +
-      '&query=' + encodeURIComponent(q) + '&pageSize=12';
-    const res = await fetch(url);
-    if(!res.ok){ throw new Error('HTTP ' + res.status); }
-    const data = await res.json();
-    searchingEl.style.display = 'none';
 
-    const foods = (data.foods || [])
-      .map(f => ({ food: f, info: extractKcal(f) }))
-      .filter(x => x.info);
-
-    if(foods.length === 0){
-      resultsEl.innerHTML = '<div class="searching">No matches — try manual entry instead.</div>';
-      return;
-    }
-    resultsEl.innerHTML = foods.slice(0,10).map((x, i) => {
-      const label = x.info.perServing
-        ? Math.round(x.info.kcal) + ' kcal / serving'
-        : Math.round(x.info.kcal) + ' kcal / 100g';
-      return `<div class="result" data-idx="${i}">
-        <div class="rname">${escapeHtml(x.food.description)}${x.food.brandOwner ? ' — ' + escapeHtml(x.food.brandOwner) : ''}</div>
-        <div class="rkcal">${label}</div>
-      </div>`;
-    }).join('');
-
-    document.querySelectorAll('.result').forEach(el => {
-      el.addEventListener('click', () => {
-        const idx = parseInt(el.getAttribute('data-idx'));
-        const x = foods[idx];
-        addEntry(x.food.description, x.info.kcal, 1);
-        document.getElementById('searchInput').value = '';
-        resultsEl.innerHTML = '';
-      });
-    });
-  }catch(e){
-    searchingEl.style.display = 'none';
-    resultsEl.innerHTML = '<div class="searching">Search failed: ' + escapeHtml(e.message || String(e)) + '</div>';
+  const providers = [searchUSDA, searchOFF];
+  let results = [];
+  for(const provider of providers){
+    try{
+      const r = await provider(q);
+      if(r.length > 0){ results = r; break; }
+    }catch(e){ /* this database failed or is unreachable — fall through to the next one */ }
   }
+
+  searchingEl.style.display = 'none';
+
+  if(results.length === 0){
+    resultsEl.innerHTML = '<div class="searching">No matches across databases. ' +
+      '<a href="https://www.google.com/search?q=' + encodeURIComponent(q + ' calories') +
+      '" target="_blank" rel="noopener" style="color:var(--accent);">Search Google for &ldquo;' + escapeHtml(q) + '&rdquo; instead</a>, or try manual entry.</div>';
+    return;
+  }
+
+  currentResults = results;
+  resultsEl.innerHTML = results.slice(0,10).map((r, i) => `
+    <div class="result" data-idx="${i}">
+      <div class="rname">${escapeHtml(r.name)}</div>
+      <div class="rkcal">${Math.round(r.kcalPerServing)} kcal ${r.unitLabel}</div>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.result').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.getAttribute('data-idx'));
+      showPortionPicker(currentResults[idx]);
+    });
+  });
+}
+
+function showPortionPicker(item){
+  const picker = document.getElementById('portionPicker');
+  picker.style.display = 'flex';
+  const quickVals = [0.25, 0.5, 0.75, 1, 1.5, 2];
+  picker.innerHTML = `
+    <div class="ppname">${escapeHtml(item.name)}</div>
+    <div class="ppbase">${Math.round(item.kcalPerServing)} kcal ${item.unitLabel} — how much did you have?</div>
+    <div class="quick">
+      ${quickVals.map(v => `<button data-v="${v}" class="${v === 1 ? 'active' : ''}">${v === 0.25 ? '¼' : v === 0.5 ? '½' : v === 0.75 ? '¾' : v}</button>`).join('')}
+    </div>
+    <div class="customrow">
+      <input type="number" id="portionCustom" step="0.1" value="1" inputmode="decimal">
+      <button id="confirmAddBtn">Add to log</button>
+    </div>
+    <button class="cancel" id="cancelPortionBtn">cancel</button>
+  `;
+
+  const customInput = document.getElementById('portionCustom');
+  picker.querySelectorAll('.quick button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      picker.querySelectorAll('.quick button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      customInput.value = btn.getAttribute('data-v');
+    });
+  });
+
+  document.getElementById('confirmAddBtn').addEventListener('click', async () => {
+    const portions = parseFloat(customInput.value);
+    if(isNaN(portions) || portions <= 0) return;
+    await addEntry(item.name, item.kcalPerServing, portions);
+    picker.style.display = 'none';
+    document.getElementById('results').innerHTML = '';
+    document.getElementById('searchInput').value = '';
+  });
+
+  document.getElementById('cancelPortionBtn').addEventListener('click', () => {
+    picker.style.display = 'none';
+  });
 }
 
 document.getElementById('searchBtn').addEventListener('click', doSearch);
@@ -388,10 +516,13 @@ document.getElementById('toggleManual').addEventListener('click', () => {
 document.getElementById('manualAdd').addEventListener('click', async () => {
   const name = document.getElementById('manualName').value.trim();
   const kcal = parseFloat(document.getElementById('manualKcal').value);
+  const portionsRaw = parseFloat(document.getElementById('manualPortions').value);
+  const portions = isNaN(portionsRaw) || portionsRaw <= 0 ? 1 : portionsRaw;
   if(!name || isNaN(kcal)) return;
-  await addEntry(name, kcal, 1);
+  await addEntry(name, kcal, portions);
   document.getElementById('manualName').value = '';
   document.getElementById('manualKcal').value = '';
+  document.getElementById('manualPortions').value = '1';
 });
 
 document.getElementById('editGoalBtn').addEventListener('click', () => {
